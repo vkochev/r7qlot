@@ -3,7 +3,7 @@ FROM node:22-alpine
 WORKDIR /app
 
 COPY dist ./dist
-COPY config.yaml ./config.yaml
+COPY config.json ./config.json
 COPY package.json ./package.json
 
 ENV PORT=3000

@@ -7,7 +7,7 @@ npm install
 npm start
 ```
 
-Server reads `config.yaml` (or `CONFIG_PATH`) and exposes:
+Server reads `config.json` (or `CONFIG_PATH`) and exposes:
 
 - `GET /healthz`
 - `GET /v1/models`

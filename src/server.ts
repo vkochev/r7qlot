@@ -16,97 +16,6 @@ type Config = {
   };
 };
 
-function parseScalar(raw: string): any {
-  const v = raw.trim();
-  if (v === 'true') return true;
-  if (v === 'false') return false;
-  if (v === 'null') return null;
-  if (/^-?\d+$/.test(v)) return Number(v);
-  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) return v.slice(1, -1);
-  if (v.startsWith('[') && v.endsWith(']')) return v.slice(1, -1).split(',').map((x) => parseScalar(x)).filter((x) => x !== '');
-  return v;
-}
-
-function parseYaml(input: string): any {
-  const lines = input
-    .split('\n')
-    .map((l) => l.replace(/\t/g, '  '))
-    .filter((l) => l.trim() && !l.trim().startsWith('#'));
-
-  const parseBlock = (start: number, indent: number): { value: any; next: number } => {
-    let i = start;
-    let container: any = null;
-    while (i < lines.length) {
-      const line = lines[i];
-      const currentIndent = line.match(/^ */)![0].length;
-      if (currentIndent < indent) break;
-      if (currentIndent > indent) throw new Error(`invalid indentation near: ${line}`);
-      const trimmed = line.trim();
-
-      if (trimmed.startsWith('- ')) {
-        if (!Array.isArray(container)) container = [];
-        const rest = trimmed.slice(2);
-        if (!rest) {
-          const nested = parseBlock(i + 1, indent + 2);
-          container.push(nested.value);
-          i = nested.next;
-          continue;
-        }
-        if (rest.includes(':')) {
-          const [k, ...r] = rest.split(':');
-          const valPart = r.join(':').trim();
-          const obj: any = {};
-          if (valPart) obj[k.trim()] = parseScalar(valPart);
-          else {
-            const nested = parseBlock(i + 1, indent + 2);
-            obj[k.trim()] = nested.value;
-            i = nested.next - 1;
-          }
-          let j = i + 1;
-          while (j < lines.length) {
-            const nline = lines[j];
-            const ni = nline.match(/^ */)![0].length;
-            if (ni <= indent) break;
-            if (ni !== indent + 2) break;
-            const t = nline.trim();
-            if (t.startsWith('- ')) break;
-            const [nk, ...nr] = t.split(':');
-            const nvp = nr.join(':').trim();
-            if (nvp) obj[nk.trim()] = parseScalar(nvp);
-            else {
-              const nested = parseBlock(j + 1, indent + 4);
-              obj[nk.trim()] = nested.value;
-              j = nested.next - 1;
-            }
-            j++;
-          }
-          container.push(obj);
-          i = j;
-          continue;
-        }
-        container.push(parseScalar(rest));
-        i++;
-        continue;
-      }
-
-      if (container === null) container = {};
-      const [key, ...rest] = trimmed.split(':');
-      const valPart = rest.join(':').trim();
-      if (valPart) {
-        container[key.trim()] = parseScalar(valPart);
-        i++;
-      } else {
-        const nested = parseBlock(i + 1, indent + 2);
-        container[key.trim()] = nested.value;
-        i = nested.next;
-      }
-    }
-    return { value: container ?? {}, next: i };
-  };
-
-  return parseBlock(0, 0).value;
-}
-
 function resolveEnvVars(value: unknown): unknown {
   if (typeof value === 'string') return value.replace(/\{env:([A-Z0-9_]+)\}/g, (_, key) => process.env[key] ?? '');
   if (Array.isArray(value)) return value.map(resolveEnvVars);
@@ -115,8 +24,8 @@ function resolveEnvVars(value: unknown): unknown {
 }
 
 function readConfig(): Config {
-  const path = process.env.CONFIG_PATH ?? 'config.yaml';
-  const raw = parseYaml(readFileSync(path, 'utf8')) as Config;
+  const path = process.env.CONFIG_PATH ?? 'config.json';
+  const raw = JSON.parse(readFileSync(path, 'utf8')) as Config;
   return resolveEnvVars(raw) as Config;
 }
 
