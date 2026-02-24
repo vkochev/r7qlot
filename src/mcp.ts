@@ -15,60 +15,44 @@ export type McpServerConfig = {
 
 export type Tool = { name: string; description?: string; inputSchema?: unknown; _serverName: string };
 
-class McpSdkClient {
-  private client: Client;
-  private connected = false;
+type ConnectedClient = { name: string; client: Client; ready: Promise<void> };
 
-  constructor(private cfg: McpServerConfig) {
-    this.client = new Client({ name: 'mvp-agent', version: '0.1.0' });
-  }
-
-  private async connectIfNeeded() {
-    if (this.connected) return;
-    if (this.cfg.transport === 'stdio') {
-      if (!this.cfg.command) throw new Error(`stdio server ${this.cfg.name} missing command`);
-      await this.client.connect(
-        new StdioClientTransport({ command: this.cfg.command, args: this.cfg.args ?? [], env: this.cfg.env ?? {} }),
-      );
-    } else {
-      if (!this.cfg.url) throw new Error(`http server ${this.cfg.name} missing url`);
-      await this.client.connect(
-        new StreamableHTTPClientTransport(this.cfg.url, { requestInit: { headers: this.cfg.headers ?? {} } }),
-      );
+function connectClient(cfg: McpServerConfig): ConnectedClient {
+  const client = new Client({ name: 'mvp-agent', version: '0.1.0' });
+  const ready = (async () => {
+    if (cfg.transport === 'stdio') {
+      if (!cfg.command) throw new Error(`stdio server ${cfg.name} missing command`);
+      await client.connect(new StdioClientTransport({ command: cfg.command, args: cfg.args ?? [], env: cfg.env ?? {} }));
+      return;
     }
-    this.connected = true;
-  }
-
-  async listTools(): Promise<Tool[]> {
-    await this.connectIfNeeded();
-    const result: any = await this.client.listTools();
-    return (result.tools ?? []).map((t: any) => ({ ...t, _serverName: this.cfg.name }));
-  }
-
-  async callTool(name: string, args: unknown): Promise<unknown> {
-    await this.connectIfNeeded();
-    const result: any = await this.client.callTool({ name, arguments: args });
-    return result;
-  }
+    if (!cfg.url) throw new Error(`http server ${cfg.name} missing url`);
+    await client.connect(new StreamableHTTPClientTransport(cfg.url, { requestInit: { headers: cfg.headers ?? {} } }));
+  })();
+  return { name: cfg.name, client, ready };
 }
 
 export class McpManager {
-  private clients: Array<{ name: string; client: McpSdkClient }>;
+  private clients: ConnectedClient[];
 
   constructor(configs: McpServerConfig[]) {
-    this.clients = (configs ?? [])
-      .filter((c) => c.enabled !== false)
-      .map((c) => ({ name: c.name, client: new McpSdkClient(c) }));
+    this.clients = (configs ?? []).filter((c) => c.enabled !== false).map(connectClient);
   }
 
   async listTools(): Promise<Tool[]> {
-    const chunks = await Promise.all(this.clients.map((c) => c.client.listTools()));
-    return chunks.flat();
+    const all = await Promise.all(
+      this.clients.map(async ({ name, client, ready }) => {
+        await ready;
+        const result: any = await client.listTools();
+        return (result.tools ?? []).map((t: any) => ({ ...t, _serverName: name }));
+      }),
+    );
+    return all.flat();
   }
 
   async callTool(serverName: string, name: string, args: unknown): Promise<unknown> {
     const item = this.clients.find((c) => c.name === serverName);
     if (!item) throw new Error(`tool server not found: ${serverName}`);
-    return item.client.callTool(name, args);
+    await item.ready;
+    return item.client.callTool({ name, arguments: args });
   }
 }
