@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "file:vendor/modelcontextprotocol-sdk",
-    "dotenv": "file:vendor/dotenv"
+    "dotenv": "file:vendor/dotenv",
+    "openai": "file:vendor/openai"
   }
 }
