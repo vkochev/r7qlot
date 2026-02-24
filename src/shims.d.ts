@@ -33,3 +33,5 @@ declare module '@modelcontextprotocol/sdk/client/transports/streamableHttp.js' {
 }
 declare var process: any;
 declare var Buffer: any;
+
+declare module 'dotenv/config';

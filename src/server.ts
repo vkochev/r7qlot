@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { runAgent } from './agent.js';

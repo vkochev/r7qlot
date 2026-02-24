@@ -14,3 +14,6 @@ Server reads `config.json` (or `CONFIG_PATH`) and exposes:
 - `POST /v1/chat/completions`
 
 Streaming mode (`stream=true`) uses SSE with OpenAI-style chunk payloads and final `data: [DONE]`.
+
+
+You can provide secrets via `.env` (loaded by `dotenv`) and reference them in config with `{env:VAR}`.
