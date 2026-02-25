@@ -1,5 +1,5 @@
 {
-  "name": "@modelcontextprotocol/sdk",
+  "name": "express",
   "version": "0.0.0-local",
   "type": "module",
   "exports": {

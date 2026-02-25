@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { createServer } from '../src/server.js';
+import { createApp } from '../src/server.js';
 
-function listen(server: any): Promise<number> {
-  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve((server.address() as any).port)));
+function listen(server: any): Promise<{ port: number; close: () => Promise<void> }> {
+  return new Promise((resolve) => {
+    const listener = server.listen(0, '127.0.0.1', () => resolve({
+      port: (listener.address() as any).port,
+      close: () => new Promise((r) => listener.close(() => r(null))),
+    }));
+  });
 }
 
 test('MVP endpoints and react loop with streaming', async () => {
@@ -74,14 +79,14 @@ test('MVP endpoints and react loop with streaming', async () => {
     res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: `Ответ: ${toolMsg.content}` } }] }));
   });
 
-  const mcpPort = await listen(mcpServer);
-  const upstreamPort = await listen(upstreamServer);
+  const mcp = await listen(mcpServer);
+  const upstream = await listen(upstreamServer);
   process.env.UPSTREAM_KEY = 'k';
 
-  const app = createServer({
+  const app = createApp({
     public_model_id: 'agent-public',
-    upstream: { base_url: `http://127.0.0.1:${upstreamPort}`, api_key_env: 'UPSTREAM_KEY', model: 'gpt-upstream' },
-    mcp: [{ name: 'm1', transport: 'http', url: `http://127.0.0.1:${mcpPort}`, enabled: true }],
+    upstream: { base_url: `http://127.0.0.1:${upstream.port}`, api_key_env: 'UPSTREAM_KEY', model: 'gpt-upstream' },
+    mcp: [{ name: 'm1', transport: 'http', url: `http://127.0.0.1:${mcp.port}`, enabled: true }],
     agent: {
       max_steps: 4,
       request_timeout_ms: 5000,
@@ -89,16 +94,16 @@ test('MVP endpoints and react loop with streaming', async () => {
       status_tags_enabled: true,
     },
   });
-  const appPort = await listen(app);
+  const appListener = await listen(app);
 
-  const health = await fetch(`http://127.0.0.1:${appPort}/healthz`);
+  const health = await fetch(`http://127.0.0.1:${appListener.port}/healthz`);
   assert.equal(health.status, 200);
 
-  const models = await fetch(`http://127.0.0.1:${appPort}/v1/models`);
+  const models = await fetch(`http://127.0.0.1:${appListener.port}/v1/models`);
   const modelsJson: any = await models.json();
   assert.equal(modelsJson.data[0].id, 'agent-public');
 
-  const nonStreamResp = await fetch(`http://127.0.0.1:${appPort}/v1/chat/completions`, {
+  const nonStreamResp = await fetch(`http://127.0.0.1:${appListener.port}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: 'agent-public', stream: false, messages: [{ role: 'user', content: '2+3' }] }),
@@ -106,7 +111,7 @@ test('MVP endpoints and react loop with streaming', async () => {
   const nonStreamJson: any = await nonStreamResp.json();
   assert.match(nonStreamJson.choices[0].message.content, /Ответ:/);
 
-  const streamResp = await fetch(`http://127.0.0.1:${appPort}/v1/chat/completions`, {
+  const streamResp = await fetch(`http://127.0.0.1:${appListener.port}/v1/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: 'agent-public', stream: true, messages: [{ role: 'user', content: '2+3' }] }),
@@ -119,8 +124,8 @@ test('MVP endpoints and react loop with streaming', async () => {
   assert.equal(mcpInitialized, true);
 
   await Promise.all([
-    new Promise((r) => app.close(() => r(null))),
-    new Promise((r) => mcpServer.close(() => r(null))),
-    new Promise((r) => upstreamServer.close(() => r(null))),
+    appListener.close(),
+    mcp.close(),
+    upstream.close(),
   ]);
 });

@@ -1,6 +1,4 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/transports/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/transports/streamableHttp.js';
+import { Client, StdioClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk';
 
 export type McpServerConfig = {
   name: string;

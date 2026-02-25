@@ -1,5 +1,5 @@
-import http from 'node:http';
 import { readFileSync } from 'node:fs';
+import express from 'express';
 import { runAgent } from './agent.js';
 import { McpManager, McpServerConfig } from './mcp.js';
 
@@ -33,62 +33,54 @@ function sseChunk(id: string, model: string, content?: string, finish: null | 's
   return { id, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: content !== undefined ? { content } : {}, finish_reason: finish }] };
 }
 
-async function readBody(req: any) {
-  let data = '';
-  for await (const chunk of req) data += chunk.toString('utf8');
-  return data ? JSON.parse(data) : {};
-}
-
-export function createServer(config: Config) {
+export function createApp(config: Config) {
+  const app = express();
+  app.use(express.json());
   const mcp = new McpManager(config.mcp ?? []);
-  return http.createServer(async (req, res) => {
+
+  app.get('/healthz', (_req: any, res: any) => res.status(200).json({ ok: true }));
+
+  app.get('/v1/models', (_req: any, res: any) => {
+    res.status(200).json({ object: 'list', data: [{ id: config.public_model_id, object: 'model' }] });
+  });
+
+  app.post('/v1/chat/completions', async (req: any, res: any) => {
     try {
-      if (req.method === 'GET' && req.url === '/healthz') {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-        return;
+      const body = req.body ?? {};
+      const model = body.model || config.public_model_id;
+      const id = `chatcmpl-${Math.random().toString(36).slice(2, 10)}`;
+      const stream = !!body.stream;
+      if (stream) {
+        res.set('content-type', 'text/event-stream');
+        res.set('cache-control', 'no-cache');
+        res.set('connection', 'keep-alive');
       }
-      if (req.method === 'GET' && req.url === '/v1/models') {
-        res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ object: 'list', data: [{ id: config.public_model_id, object: 'model' }] }));
-        return;
+      const final = await runAgent({
+        messages: body.messages ?? [],
+        mcp,
+        agent: config.agent,
+        upstream: { base_url: config.upstream.base_url, model: config.upstream.model, api_key: process.env[config.upstream.api_key_env] ?? '', timeout_ms: config.upstream.timeout_ms },
+        onChunk: (txt) => {
+          if (stream) res.write(`data: ${JSON.stringify(sseChunk(id, model, txt, null))}\n\n`);
+        },
+      });
+      if (stream) {
+        res.write(`data: ${JSON.stringify(sseChunk(id, model, undefined, 'stop'))}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+      } else {
+        res.status(200).json({ id, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: 'assistant', content: final }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
       }
-      if (req.method === 'POST' && req.url === '/v1/chat/completions') {
-        const body = await readBody(req);
-        const model = body.model || config.public_model_id;
-        const id = `chatcmpl-${Math.random().toString(36).slice(2, 10)}`;
-        const stream = !!body.stream;
-        if (stream) res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
-        const final = await runAgent({
-          messages: body.messages ?? [],
-          mcp,
-          agent: config.agent,
-          upstream: { base_url: config.upstream.base_url, model: config.upstream.model, api_key: process.env[config.upstream.api_key_env] ?? '', timeout_ms: config.upstream.timeout_ms },
-          onChunk: (txt) => {
-            if (stream) res.write(`data: ${JSON.stringify(sseChunk(id, model, txt, null))}\n\n`);
-          },
-        });
-        if (stream) {
-          res.write(`data: ${JSON.stringify(sseChunk(id, model, undefined, 'stop'))}\n\n`);
-          res.write('data: [DONE]\n\n');
-          res.end();
-        } else {
-          res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify({ id, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: 'assistant', content: final }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } }));
-        }
-        return;
-      }
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: 'not found' }));
     } catch (err: any) {
-      if (!res.headersSent) res.writeHead(500, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: err.message ?? String(err) }));
+      res.status(500).json({ error: err.message ?? String(err) });
     }
   });
+
+  return app;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = readConfig();
   const port = Number(process.env.PORT ?? 3000);
-  createServer(config).listen(port, '0.0.0.0', () => console.log(`listening on ${port}`));
+  createApp(config).listen(port, '0.0.0.0', () => console.log(`listening on ${port}`));
 }
