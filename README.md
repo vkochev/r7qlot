@@ -16,6 +16,55 @@ npm run build
 npm start
 ```
 
+
+## Example `config.json`
+
+Ниже пример заполненного конфига с общеизвестными MCP-серверами (значения ключей/токенов — mock):
+
+```json
+{
+  "public_model_id": "agent-mvp",
+  "upstream": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-4o-mini",
+    "timeout_ms": 30000
+  },
+  "mcp": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "enabled": true
+    },
+    {
+      "name": "github",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_mock_example_token_1234567890"
+      },
+      "enabled": true
+    }
+  ],
+  "agent": {
+    "max_steps": 8,
+    "request_timeout_ms": 60000,
+    "max_tool_output_bytes": 65536,
+    "tool_policy": {
+      "allowlist": [],
+      "denylist": []
+    },
+    "status_tags_enabled": true,
+    "repeat_tool_call_limit": 3
+  }
+}
+```
+
+> В реальном окружении храните секреты в переменных окружения/секрет-хранилище, а не прямо в `config.json`.
+
 ## Run via Docker Compose
 
 1. Create local env file:

@@ -1,6 +1,10 @@
 declare module 'node:http' {
-  const x: any;
-  export default x;
+  export type Server = any;
+  export function createServer(...args: any[]): Server;
+  const http: {
+    createServer: typeof createServer;
+  };
+  export default http;
 }
 declare module 'node:fs' {
   export const readFileSync: any;
