@@ -15,9 +15,9 @@ RUN npm run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
+COPY package.json package-lock.json ./
 COPY --from=deps /app/node_modules ./node_modules
 RUN npm prune --omit=dev
-COPY package.json package-lock.json ./
 COPY --from=build /app/dist ./dist
 COPY config.json ./config.json
 
