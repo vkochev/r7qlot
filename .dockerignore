@@ -1,0 +1,19 @@
+# VCS / editor
+.git
+.gitignore
+
+# Local secrets and env
+.env.local
+.env.*
+!.env.local.template
+
+# Local-only config
+config.local.json
+
+# Build artifacts / deps
+node_modules
+dist
+
+# Misc
+npm-debug.log*
+.DS_Store
