@@ -1,0 +1,48 @@
+{
+  "public_model_id": "agent-mvp",
+  "upstream": {
+    "base_url": "https://api.openai.com/v1",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "gpt-4o-mini",
+    "timeout_ms": 30000
+  },
+  "mcp": [
+    {
+      "name": "filesystem",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+      "enabled": true
+    },
+    {
+      "name": "github",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_mock_example_token_1234567890"
+      },
+      "enabled": true
+    },
+    {
+      "name": "deepwiki-http",
+      "transport": "http",
+      "url": "https://mcp.deepwiki.com/mcp",
+      "headers": {
+        "Authorization": "Bearer mock_deepwiki_token"
+      },
+      "enabled": false
+    }
+  ],
+  "agent": {
+    "max_steps": 8,
+    "request_timeout_ms": 60000,
+    "max_tool_output_bytes": 65536,
+    "tool_policy": {
+      "allowlist": [],
+      "denylist": []
+    },
+    "status_tags_enabled": true,
+    "repeat_tool_call_limit": 3
+  }
+}

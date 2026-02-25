@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import express from 'express';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { runAgent } from './agent.js';
 import { McpManager, McpServerConfig } from './mcp.js';
 
@@ -13,13 +14,24 @@ type Config = {
     max_tool_output_bytes: number;
     tool_policy?: { allowlist?: string[]; denylist?: string[] };
     status_tags_enabled?: boolean;
+    repeat_tool_call_limit?: number;
   };
 };
 
+type ChatCompletionRequestBody = {
+  model?: string;
+  stream?: boolean;
+  messages?: ChatCompletionMessageParam[];
+};
+
 function resolveEnvVars(value: unknown): unknown {
-  if (typeof value === 'string') return value.replace(/\{env:([A-Z0-9_]+)\}/g, (_, key) => process.env[key] ?? '');
+  if (typeof value === 'string') return value.replace(/\{env:([A-Z0-9_]+)\}/g, (_, key: string) => process.env[key] ?? '');
   if (Array.isArray(value)) return value.map(resolveEnvVars);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value as any).map(([k, v]) => [k, resolveEnvVars(v)]));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, resolveEnvVars(v)]),
+    );
+  }
   return value;
 }
 
@@ -30,7 +42,13 @@ function readConfig(): Config {
 }
 
 function sseChunk(id: string, model: string, content?: string, finish: null | 'stop' = null) {
-  return { id, object: 'chat.completion.chunk', created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, delta: content !== undefined ? { content } : {}, finish_reason: finish }] };
+  return {
+    id,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta: content !== undefined ? { content } : {}, finish_reason: finish }],
+  };
 }
 
 export function createApp(config: Config) {
@@ -38,15 +56,23 @@ export function createApp(config: Config) {
   app.use(express.json());
   const mcp = new McpManager(config.mcp ?? []);
 
-  app.get('/healthz', (_req: any, res: any) => res.status(200).json({ ok: true }));
+  app.get('/healthz', (_req, res) => res.status(200).json({ ok: true }));
 
-  app.get('/v1/models', (_req: any, res: any) => {
+  app.get('/v1/models', (_req, res) => {
     res.status(200).json({ object: 'list', data: [{ id: config.public_model_id, object: 'model' }] });
   });
 
-  app.post('/v1/chat/completions', async (req: any, res: any) => {
+  app.post('/v1/chat/completions', async (req, res) => {
+    const abortController = new AbortController();
+    const abortOnDisconnect = () => abortController.abort(new Error('client disconnected'));
+    const abortOnClose = () => {
+      if (req.aborted) abortOnDisconnect();
+    };
+    req.once('aborted', abortOnDisconnect);
+    req.once('close', abortOnClose);
+
     try {
-      const body = req.body ?? {};
+      const body = (req.body ?? {}) as ChatCompletionRequestBody;
       const model = body.model || config.public_model_id;
       const id = `chatcmpl-${Math.random().toString(36).slice(2, 10)}`;
       const stream = !!body.stream;
@@ -55,24 +81,43 @@ export function createApp(config: Config) {
         res.set('cache-control', 'no-cache');
         res.set('connection', 'keep-alive');
       }
+
       const final = await runAgent({
         messages: body.messages ?? [],
         mcp,
+        signal: abortController.signal,
         agent: config.agent,
-        upstream: { base_url: config.upstream.base_url, model: config.upstream.model, api_key: process.env[config.upstream.api_key_env] ?? '', timeout_ms: config.upstream.timeout_ms },
+        upstream: {
+          base_url: config.upstream.base_url,
+          model: config.upstream.model,
+          api_key: process.env[config.upstream.api_key_env] ?? '',
+          timeout_ms: config.upstream.timeout_ms,
+        },
         onChunk: (txt) => {
           if (stream) res.write(`data: ${JSON.stringify(sseChunk(id, model, txt, null))}\n\n`);
         },
       });
+
       if (stream) {
         res.write(`data: ${JSON.stringify(sseChunk(id, model, undefined, 'stop'))}\n\n`);
         res.write('data: [DONE]\n\n');
         res.end();
       } else {
-        res.status(200).json({ id, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: 'assistant', content: final }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 } });
+        res.status(200).json({
+          id,
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model,
+          choices: [{ index: 0, message: { role: 'assistant', content: final }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        });
       }
-    } catch (err: any) {
-      res.status(500).json({ error: err.message ?? String(err) });
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      if (!res.headersSent) res.status(500).json({ error: errorMessage });
+    } finally {
+      req.off('aborted', abortOnDisconnect);
+      req.off('close', abortOnClose);
     }
   });
 

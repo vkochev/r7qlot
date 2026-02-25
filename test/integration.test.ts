@@ -1,14 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
+import * as http from 'node:http';
 import { createApp } from '../src/server.js';
 
-function listen(server: any): Promise<{ port: number; close: () => Promise<void> }> {
+type Closable = { port: number; close: () => Promise<void> };
+
+function listen(server: http.Server): Promise<Closable> {
   return new Promise((resolve) => {
-    const listener = server.listen(0, '127.0.0.1', () => resolve({
-      port: (listener.address() as any).port,
-      close: () => new Promise((r) => listener.close(() => r(null))),
-    }));
+    const listener = server.listen(0, '127.0.0.1', () => {
+      const address = listener.address();
+      const port = typeof address === 'object' && address ? address.port : 0;
+      resolve({
+        port,
+        close: () => new Promise((r) => listener.close(() => r())),
+      });
+    });
   });
 }
 
@@ -19,7 +25,7 @@ test('MVP endpoints and react loop with streaming', async () => {
   const mcpServer = http.createServer(async (req, res) => {
     let body = '';
     for await (const ch of req) body += ch.toString();
-    const rpc = JSON.parse(body);
+    const rpc = JSON.parse(body) as { method: string; id: string | number | null; params?: { arguments?: { a: number; b: number } } };
     res.setHeader('content-type', 'application/json');
     res.setHeader('Mcp-Session-Id', req.headers['mcp-session-id']?.toString() || 'sess-1');
     if (rpc.method === 'initialize') {
@@ -39,7 +45,7 @@ test('MVP endpoints and react loop with streaming', async () => {
     }
     if (rpc.method === 'tools/call') {
       toolCalled = true;
-      const { a, b } = rpc.params.arguments;
+      const { a, b } = rpc.params?.arguments ?? { a: 0, b: 0 };
       res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { value: a + b } }));
       return;
     }
@@ -49,8 +55,8 @@ test('MVP endpoints and react loop with streaming', async () => {
   const upstreamServer = http.createServer(async (req, res) => {
     let body = '';
     for await (const ch of req) body += ch.toString();
-    const payload = JSON.parse(body);
-    const hasTool = payload.messages.some((m: any) => m.role === 'tool');
+    const payload = JSON.parse(body) as { messages: Array<{ role: string; content?: string }> };
+    const hasTool = payload.messages.some((m) => m.role === 'tool');
     res.setHeader('content-type', 'application/json');
     if (!hasTool) {
       res.end(
@@ -74,8 +80,9 @@ test('MVP endpoints and react loop with streaming', async () => {
       );
       return;
     }
-    const toolMsg = payload.messages.findLast((m: any) => m.role === 'tool');
-    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: `Ответ: ${toolMsg.content}` } }] }));
+    const toolMessages = payload.messages.filter((m) => m.role === 'tool');
+    const toolMsg = toolMessages[toolMessages.length - 1];
+    res.end(JSON.stringify({ choices: [{ message: { role: 'assistant', content: `Ответ: ${toolMsg?.content ?? ''}` } }] }));
   });
 
   const mcp = await listen(mcpServer);
@@ -99,7 +106,7 @@ test('MVP endpoints and react loop with streaming', async () => {
   assert.equal(health.status, 200);
 
   const models = await fetch(`http://127.0.0.1:${appListener.port}/v1/models`);
-  const modelsJson: any = await models.json();
+  const modelsJson = (await models.json()) as { data: Array<{ id: string }> };
   assert.equal(modelsJson.data[0].id, 'agent-public');
 
   const nonStreamResp = await fetch(`http://127.0.0.1:${appListener.port}/v1/chat/completions`, {
@@ -107,7 +114,7 @@ test('MVP endpoints and react loop with streaming', async () => {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ model: 'agent-public', stream: false, messages: [{ role: 'user', content: '2+3' }] }),
   });
-  const nonStreamJson: any = await nonStreamResp.json();
+  const nonStreamJson = (await nonStreamResp.json()) as { choices: Array<{ message: { content: string } }> };
   assert.match(nonStreamJson.choices[0].message.content, /Ответ:/);
 
   const streamResp = await fetch(`http://127.0.0.1:${appListener.port}/v1/chat/completions`, {
@@ -122,9 +129,83 @@ test('MVP endpoints and react loop with streaming', async () => {
   assert.equal(toolCalled, true);
   assert.equal(mcpInitialized, true);
 
-  await Promise.all([
-    appListener.close(),
-    mcp.close(),
-    upstream.close(),
-  ]);
+  await Promise.all([appListener.close(), mcp.close(), upstream.close()]);
+});
+
+test('repeated tool-call guard stops loop', async () => {
+  const mcpServer = http.createServer(async (req, res) => {
+    let body = '';
+    for await (const ch of req) body += ch.toString();
+    const rpc = JSON.parse(body) as { method: string; id: string | number | null };
+    res.setHeader('content-type', 'application/json');
+    res.setHeader('Mcp-Session-Id', req.headers['mcp-session-id']?.toString() || 'sess-repeat');
+
+    if (rpc.method === 'initialize') {
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'mock', version: '1.0.0' } } }));
+      return;
+    }
+    if (rpc.method === 'tools/list') {
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { tools: [{ name: 'sum', inputSchema: { type: 'object' } }] } }));
+      return;
+    }
+    if (rpc.method === 'tools/call') {
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { value: 5 } }));
+      return;
+    }
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id ?? null, result: {} }));
+  });
+
+  const upstreamServer = http.createServer(async (req, res) => {
+    for await (const _ch of req) {
+      // drain
+    }
+    res.setHeader('content-type', 'application/json');
+    res.end(
+      JSON.stringify({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: '',
+              tool_calls: [
+                {
+                  id: `call_repeat_${Date.now()}`,
+                  type: 'function',
+                  function: { name: 'sum', arguments: JSON.stringify({ a: 2, b: 3 }) },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+  });
+
+  const mcp = await listen(mcpServer);
+  const upstream = await listen(upstreamServer);
+  process.env.UPSTREAM_KEY = 'k';
+
+  const app = createApp({
+    public_model_id: 'agent-public',
+    upstream: { base_url: `http://127.0.0.1:${upstream.port}`, api_key_env: 'UPSTREAM_KEY', model: 'gpt-upstream' },
+    mcp: [{ name: 'm1', transport: 'http', url: `http://127.0.0.1:${mcp.port}`, enabled: true }],
+    agent: {
+      max_steps: 6,
+      request_timeout_ms: 5000,
+      max_tool_output_bytes: 1024,
+      repeat_tool_call_limit: 2,
+    },
+  });
+  const appListener = await listen(app);
+
+  const resp = await fetch(`http://127.0.0.1:${appListener.port}/v1/chat/completions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ model: 'agent-public', stream: false, messages: [{ role: 'user', content: 'loop' }] }),
+  });
+  assert.equal(resp.status, 500);
+  const body = (await resp.json()) as { error: string };
+  assert.match(body.error, /repeated tool-call guard triggered/);
+
+  await Promise.all([appListener.close(), mcp.close(), upstream.close()]);
 });
