@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import http, { type Server } from 'node:http';
+import * as http from 'node:http';
 import { createApp } from '../src/server.js';
 
 type Closable = { port: number; close: () => Promise<void> };
 
-function listen(server: Server): Promise<Closable> {
+function listen(server: http.Server): Promise<Closable> {
   return new Promise((resolve) => {
     const listener = server.listen(0, '127.0.0.1', () => {
       const address = listener.address();
