@@ -1,4 +1,9 @@
-import { Client, StdioClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const { Client } = require('@modelcontextprotocol/sdk/client');
+const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
+const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
 
 export type McpServerConfig = {
   name: string;
@@ -13,7 +18,7 @@ export type McpServerConfig = {
 
 export type Tool = { name: string; description?: string; inputSchema?: unknown; _serverName: string };
 
-type ConnectedClient = { name: string; client: Client; ready: Promise<void> };
+type ConnectedClient = { name: string; client: any; ready: Promise<void> };
 
 function connectClient(cfg: McpServerConfig): ConnectedClient {
   const client = new Client({ name: 'mvp-agent', version: '0.1.0' });

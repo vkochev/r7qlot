@@ -24,7 +24,7 @@ test('MVP endpoints and react loop with streaming', async () => {
     res.setHeader('Mcp-Session-Id', req.headers['mcp-session-id']?.toString() || 'sess-1');
     if (rpc.method === 'initialize') {
       mcpInitialized = true;
-      res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { serverInfo: { name: 'mock' } } }));
+      res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'mock', version: '1.0.0' } } }));
       return;
     }
     if (rpc.method === 'tools/list') {
@@ -43,8 +43,7 @@ test('MVP endpoints and react loop with streaming', async () => {
       res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { value: a + b } }));
       return;
     }
-    res.statusCode = 404;
-    res.end();
+    res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id ?? null, result: {} }));
   });
 
   const upstreamServer = http.createServer(async (req, res) => {

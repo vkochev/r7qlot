@@ -5,6 +5,9 @@ declare module 'node:http' {
 declare module 'node:fs' {
   export const readFileSync: any;
 }
+declare module 'node:module' {
+  export const createRequire: any;
+}
 declare module 'node:test' {
   const test: any;
   export default test;
@@ -17,19 +20,14 @@ declare module 'express' {
   const express: any;
   export default express;
 }
-declare module '@modelcontextprotocol/sdk' {
-  export class Client {
-    constructor(info?: any);
-    connect(transport: any): Promise<void>;
-    listTools(): Promise<any>;
-    callTool(input: any): Promise<any>;
-  }
-  export class StdioClientTransport {
-    constructor(cfg: any);
-  }
-  export class StreamableHTTPClientTransport {
-    constructor(url: string, opts?: any);
-  }
+declare module '@modelcontextprotocol/sdk/client' {
+  export const Client: any;
+}
+declare module '@modelcontextprotocol/sdk/client/stdio.js' {
+  export const StdioClientTransport: any;
+}
+declare module '@modelcontextprotocol/sdk/client/streamableHttp.js' {
+  export const StreamableHTTPClientTransport: any;
 }
 declare var process: any;
 declare var Buffer: any;
