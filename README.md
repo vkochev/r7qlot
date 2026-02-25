@@ -16,54 +16,20 @@ npm run build
 npm start
 ```
 
+## Local config template (with MCP examples)
 
-## Example `config.json`
+Пример с несколькими MCP-серверами (stdio + http transport) вынесен в `config.local.json.template`.
 
-Ниже пример заполненного конфига с общеизвестными MCP-серверами (значения ключей/токенов — mock):
-
-```json
-{
-  "public_model_id": "agent-mvp",
-  "upstream": {
-    "base_url": "https://api.openai.com/v1",
-    "api_key_env": "OPENAI_API_KEY",
-    "model": "gpt-4o-mini",
-    "timeout_ms": 30000
-  },
-  "mcp": [
-    {
-      "name": "filesystem",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
-      "enabled": true
-    },
-    {
-      "name": "github",
-      "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_mock_example_token_1234567890"
-      },
-      "enabled": true
-    }
-  ],
-  "agent": {
-    "max_steps": 8,
-    "request_timeout_ms": 60000,
-    "max_tool_output_bytes": 65536,
-    "tool_policy": {
-      "allowlist": [],
-      "denylist": []
-    },
-    "status_tags_enabled": true,
-    "repeat_tool_call_limit": 3
-  }
-}
+```bash
+cp config.local.json.template config.local.json
 ```
 
-> В реальном окружении храните секреты в переменных окружения/секрет-хранилище, а не прямо в `config.json`.
+В template уже есть примеры:
+- `@modelcontextprotocol/server-filesystem` (stdio)
+- `@modelcontextprotocol/server-github` (stdio)
+- `deepwiki-http` (http transport, disabled по умолчанию)
+
+> В реальном окружении храните секреты в переменных окружения/secret manager, а не в файле конфига.
 
 ## Run via Docker Compose
 
@@ -75,16 +41,25 @@ cp .env.local.template .env.local
 
 2. Fill `.env.local` (at minimum `OPENAI_API_KEY`).
 
-3. First run with build:
+3. (Опционально) использовать локальный конфиг-шаблон:
 
 ```bash
-docker-compose up --build
+cp config.local.json.template config.local.json
 ```
 
-4. Next runs:
+Если хотите запускаться именно с ним в Docker, замените volume в `docker-compose.yml` на
+`./config.local.json:/app/config.local.json:ro` и выставьте `CONFIG_PATH=/app/config.local.json` в `.env.local`.
+
+4. First run with build:
 
 ```bash
-docker-compose up
+docker compose up --build
+```
+
+5. Next runs:
+
+```bash
+docker compose up
 ```
 
 ## Smoke-check after compose startup
