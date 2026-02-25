@@ -1,9 +1,8 @@
-import { createRequire } from 'node:module';
-
-const require = createRequire(import.meta.url);
-const { Client } = require('@modelcontextprotocol/sdk/client');
-const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio.js');
-const { StreamableHTTPClientTransport } = require('@modelcontextprotocol/sdk/client/streamableHttp.js');
+import { Client } from '@modelcontextprotocol/sdk/client';
+import type { RequestOptions } from '@modelcontextprotocol/sdk/shared/protocol.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import type { CallToolResult, ListToolsResult } from '@modelcontextprotocol/sdk/types.js';
 
 export type McpServerConfig = {
   name: string;
@@ -16,9 +15,15 @@ export type McpServerConfig = {
   headers?: Record<string, string>;
 };
 
-export type Tool = { name: string; description?: string; inputSchema?: unknown; _serverName: string };
+export type Tool = {
+  name: string;
+  description?: string;
+  inputSchema?: unknown;
+  _serverName: string;
+};
 
-type ConnectedClient = { name: string; client: any; ready: Promise<void> };
+type McpClient = InstanceType<typeof Client>;
+type ConnectedClient = { name: string; client: McpClient; ready: Promise<void> };
 
 function connectClient(cfg: McpServerConfig): ConnectedClient {
   const client = new Client({ name: 'mvp-agent', version: '0.1.0' });
@@ -29,7 +34,7 @@ function connectClient(cfg: McpServerConfig): ConnectedClient {
       return;
     }
     if (!cfg.url) throw new Error(`http server ${cfg.name} missing url`);
-    await client.connect(new StreamableHTTPClientTransport(cfg.url, { requestInit: { headers: cfg.headers ?? {} } }));
+    await client.connect(new StreamableHTTPClientTransport(new URL(cfg.url), { requestInit: { headers: cfg.headers ?? {} } }));
   })();
   return { name: cfg.name, client, ready };
 }
@@ -41,21 +46,21 @@ export class McpManager {
     this.clients = (configs ?? []).filter((c) => c.enabled !== false).map(connectClient);
   }
 
-  async listTools(): Promise<Tool[]> {
+  async listTools(options?: RequestOptions): Promise<Tool[]> {
     const all = await Promise.all(
       this.clients.map(async ({ name, client, ready }) => {
         await ready;
-        const result: any = await client.listTools();
-        return (result.tools ?? []).map((t: any) => ({ ...t, _serverName: name }));
+        const result: ListToolsResult = await client.listTools(undefined, options);
+        return (result.tools ?? []).map((t) => ({ ...t, _serverName: name }));
       }),
     );
     return all.flat();
   }
 
-  async callTool(serverName: string, name: string, args: unknown): Promise<unknown> {
+  async callTool(serverName: string, name: string, args: unknown, options?: RequestOptions): Promise<CallToolResult> {
     const item = this.clients.find((c) => c.name === serverName);
     if (!item) throw new Error(`tool server not found: ${serverName}`);
     await item.ready;
-    return item.client.callTool({ name, arguments: args });
+    return item.client.callTool({ name, arguments: args }, undefined, options);
   }
 }
