@@ -1,4 +1,3 @@
-import OpenAI from 'openai';
 import { McpManager } from './mcp.js';
 
 type ChatMessage = { role: string; content?: string; tool_calls?: any[]; tool_call_id?: string; name?: string };
@@ -44,22 +43,20 @@ export async function runAgent(input: AgentRunInput): Promise<string> {
 
   const messages: ChatMessage[] = [...input.messages];
 
-  const openai = new OpenAI({
-    apiKey: input.upstream.api_key,
-    baseURL: input.upstream.base_url,
-  });
-
   for (let step = 0; step < input.agent.max_steps; step++) {
     timeoutCheck();
-    const json: any = await openai.chat.completions.create(
-      {
+    const resp = await fetch(`${input.upstream.base_url}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Authorization: `Bearer ${input.upstream.api_key}` },
+      body: JSON.stringify({
         model: input.upstream.model,
         stream: false,
         messages,
         tools: tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.inputSchema } })),
-      },
-      { signal: AbortSignal.timeout(input.upstream.timeout_ms ?? input.agent.request_timeout_ms) },
-    );
+      }),
+      signal: AbortSignal.timeout(input.upstream.timeout_ms ?? input.agent.request_timeout_ms),
+    });
+    const json: any = await resp.json();
     const msg = json.choices?.[0]?.message;
     if (!msg) throw new Error('upstream returned empty choice');
 

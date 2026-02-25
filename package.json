@@ -9,8 +9,6 @@
     "test": "node --test dist/test/integration.test.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "file:vendor/modelcontextprotocol-sdk",
-    "dotenv": "file:vendor/dotenv",
-    "openai": "file:vendor/openai"
+    "@modelcontextprotocol/sdk": "file:vendor/modelcontextprotocol-sdk"
   }
 }

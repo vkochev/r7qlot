@@ -34,11 +34,4 @@ declare module '@modelcontextprotocol/sdk/client/transports/streamableHttp.js' {
 declare var process: any;
 declare var Buffer: any;
 
-declare module 'dotenv/config';
 
-declare module 'openai' {
-  export default class OpenAI {
-    constructor(cfg: any);
-    chat: { completions: { create(payload: any, options?: any): Promise<any> } };
-  }
-}
